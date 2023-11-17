@@ -1,0 +1,51 @@
+---
+
+- name: Detach the device
+  vars:
+    ansible_user: opc
+    ansible_become: yes
+    ansible_become_method: sudo
+
+  hosts: '{{ instance_ip }}'
+  tasks:
+    - name: Find the IQN
+      shell: |
+        iscsiadm --mode session  -P 3 | grep Target: | head | awk -F " " '{print $2}'
+      register: iqn
+
+    - name: Stop  MySQL
+      service: name=mysqld state=stopped enabled=false
+      when: iqn.stdout != ""
+
+    - name: Find possible processes holding the file system
+      shell: |
+        lsof +D /var/lib/mysql |  awk -F " " '{print $2}' | uniq | grep -v "PID"
+      register: locking_processes
+      ignore_errors: yes
+
+    - name: Print locking process
+      debug:
+        msg: '{{ locking_processes }}'
+      when: locking_processes.stdout_lines|length != 0
+
+    - name: Kill and unmount the file system
+      shell: |
+        kill -9 '{{ item }}'
+      with_items: '{{ locking_processes.stdout_lines }}'
+      when: locking_processes.stdout_lines|length != 0
+      ignore_errors: yes
+
+    - name: Print IQN
+      debug:
+        msg: '{{iqn.stdout}}'
+
+    - name: Unmount File system
+      mount:
+        path: /var/lib/mysql
+        state: unmounted
+
+    - name: Detach the iSCSI
+      community.general.open_iscsi:
+        login: no
+        target: '{{iqn.stdout}}'
+      when: iqn.stdout != ""

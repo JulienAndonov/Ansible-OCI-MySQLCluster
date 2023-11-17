@@ -1,0 +1,83 @@
+---
+
+- hosts: localhost
+  collections:
+    - oracle.oci
+  vars_files:
+    - ../variables.yml
+
+  tasks:
+    - block:
+      - name: Get instance details
+        oci_compute_instance_facts:
+          compartment_id: "{{ instance_compartment }}"
+          lifecycle_state: "RUNNING"
+          display_name: "{{ hostname }}"
+        register: instances_details
+
+      - name: Get facts
+        debug:
+          msg: "{{ instances_details }}"
+
+      - name: Save instance info
+        set_fact:
+          instance: '{{ instances_details["instances"] }}'
+          instance_ips: '{{instances_details["instances"][0].primary_private_ip }}'
+
+      - name: Show instances name
+        debug:
+          msg: '{{instance}}'
+
+      - name: Show instance's IPs
+        debug:
+          msg: '{{instance_ips}}'
+
+      - name: Add instance(s) to in-memory inventory
+        add_host:
+          name: '{{ instance_ips }}'
+
+
+      - name: Get hostvars
+        debug:
+          msg: '{{ hostvars["localhost"]["instance_ips"]}}'
+
+      - name: Create a block device
+        oci_blockstorage_volume:
+          compartment_id: "{{ instance_compartment }}"
+          availability_domain: "{{ instances_details.instances[0].availability_domain }}"
+          display_name: "{{ hostname }}-bv1"
+          size_in_gbs: 50
+        register: created_volume
+
+      - name: Get the block device data
+        oci_blockstorage_volume_facts:
+          display_name: "{{ hostname }}-bv1"
+          availability_domain: "{{ instance_ad }}"
+          compartment_id: "{{ instance_compartment }}"
+          lifecycle_state: "AVAILABLE"
+        register: compute_node_block_volume
+
+      - name: Print block devices
+        debug:
+          msg: "{{ compute_node_block_volume }}"
+
+      - name: Attach volume_attachment
+        oci_compute_volume_attachment:
+          compartment_id: "{{ instance_compartment }}"
+          instance_id: "{{ instances_details.instances[0].id }}"
+          type: service_determined
+          volume_id: "{{ compute_node_block_volume.volumes[0].id }}"
+        register: attached_block_device
+
+      - name: Save attachement commands
+        set_fact:
+          iscsi_attach_commands: '{{ attached_block_device.volume_attachment.iscsi_attach_commands }}'
+
+- import_playbook: execute_shell_commands_root.yml
+  vars:
+    instance_ip: '{{ hostvars["localhost"]["instance_ips"] }}'
+    bash_commands: '{{ hostvars["localhost"]["iscsi_attach_commands"] }}'
+
+- import_playbook: attach_iscsi.yml
+  vars:
+    instance_ip: '{{ hostvars["localhost"]["instance_ips"] }}'

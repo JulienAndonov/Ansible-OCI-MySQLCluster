@@ -1,0 +1,8 @@
+SSH_port: "22"
+instance_compartment: "ocid1.compartment.oc1..aaaaaaaawmkoyiqsxkalddfg3xxapwk22yovanosn766hjr2xwhk7td7zusa"
+instance_ad: "dppR:EU-FRANKFURT-1-AD-1"
+instance_image: "ocid1.image.oc1.eu-frankfurt-1.aaaaaaaahfwwevp4ap33stiunwq6sfo4lvbweeiczmufwc2qbpv2jwjb4ija"
+private_key: "/Users/julien.andonov/.oci/id_oci"
+home_dir: "/Users/julien.andonov/Work/POCE-playbooks/oci-ansible-collection/samples/compute/venv"
+TCP_protocol: "6"
+instance_shape: "VM.Standard.E2.1.Micro"

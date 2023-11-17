@@ -1,0 +1,30 @@
+---
+
+- name: Attach the device
+  vars:
+    ansible_user: opc
+    ansible_become: yes
+    ansible_become_method: sudo
+
+  hosts: '{{ instance_ip }}'
+  tasks:
+
+    - name: Disable Selinux
+      ansible.builtin.command: setenforce 0
+
+    - name: Disable firewall
+      ansible.builtin.service:
+        name: firewalld
+        state: stopped
+
+    - name: Create file system
+      community.general.filesystem:
+        fstype: ext4
+        dev: /dev/sdb
+
+    - name: Mount a file system
+      mount:
+        path: "/var/lib/mysql"
+        src: "/dev/sdb"
+        fstype: ext4
+        state: mounted

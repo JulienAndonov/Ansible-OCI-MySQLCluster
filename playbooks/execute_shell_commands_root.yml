@@ -1,0 +1,14 @@
+---
+
+- name: Attach the device
+  vars:
+    ansible_user: opc
+    ansible_become: yes
+    ansible_become_method: sudo
+
+  hosts: '{{ instance_ip }}'
+  tasks:
+    - block:
+      - name: Execute commands
+        ansible.builtin.command: '{{ item }}'
+        loop: '{{ bash_commands }}'

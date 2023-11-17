@@ -1,0 +1,53 @@
+---
+
+- name: Detach the device
+  vars:
+    ansible_user: opc
+    ansible_become: yes
+    ansible_become_method: sudo
+  vars_files:
+    - ../variables.yml
+
+  hosts: '{{ instance_ip }}'
+  tasks:
+    - name: Stop Firewall
+      service: name=firewalld state=stopped enabled=false
+
+    - name: Get file coordinate
+      shell: |
+        cat /var/lib/mysql/mysql5/{{ PRIMARY }}-bin.index | tail -1
+      register: replication_file
+
+    - name: Get position coordinate
+      shell: |
+        wc {{ replication_file.stdout }} | awk -F " " '{print $3}'
+      register: replication_position
+
+    - name: Change the UUID of MySQL
+      shell: |
+        newUUID=`uuidgen`
+        echo "
+        [auto]
+        server-uuid=${newUUID}" > /var/lib/mysql/mysql5/auto.cnf
+
+    - name: Start MySQL
+      service: name=mysqld state=started enabled=true
+
+    - name: Change primary on Replica
+      community.mysql.mysql_replication:
+        mode: changeprimary
+        primary_host: '{{ primary_prv_ip }}'
+        primary_log_file: '{{ replication_file.stdout }}'
+        primary_log_pos: '{{ replication_position.stdout }}'
+        login_unix_socket: /var/lib/mysql/mysql5/mysql.sock
+        login_user: root
+        login_password: "{{ root_password }}"
+        primary_user: 'replication'
+        primary_password: "{{ root_password }}"
+
+    - name: Start replica
+      community.mysql.mysql_replication:
+        mode: startreplica
+        login_unix_socket: /var/lib/mysql/mysql5/mysql.sock
+        login_user: root
+        login_password: "{{ root_password }}"

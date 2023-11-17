@@ -1,0 +1,52 @@
+---
+
+- hosts: localhost
+  collections:
+    - oracle.oci
+  vars_files:
+    - ~/resnap/vars/variables.yml
+
+  tasks:
+    - name: Get Replica instance details
+      oci_compute_instance_facts:
+        compartment_id: "{{ instance_compartment }}"
+        lifecycle_state: "RUNNING"
+        display_name: "{{ REPLICA }}"
+      register: replica_details
+
+    - name: Save Replica info
+      set_fact:
+        instance: '{{ replica_details["instances"] }}'
+        replica_ip: '{{replica_details["instances"] | map(attribute="primary_public_ip")  }}'
+
+    - name: Add replica instance(s) to in-memory inventory
+      add_host:
+        name: "replica_ip"
+        ansible_host: '{{ replica_ip }}'
+
+    - name: Get attached devices on Replica
+      oci_compute_volume_attachment_facts:
+        compartment_id: "{{ instance_compartment }}"
+        instance_id: "{{ replica_details.instances[0].id }}"
+      register: replica_volume_attachment_facts
+
+- import_playbook: detach_iscsi.yml
+  vars:
+    instance_ip: '{{ hostvars["localhost"]["replica_ip"] }}'
+
+- name: Create iSCSI attachement
+  hosts: localhost
+  collections:
+    - oracle.oci
+  vars_files:
+    - ../variables.yml
+  tasks:
+    - block:
+
+
+- import_playbook: setup_replication.yml
+  vars:
+    instance_ip: '{{ hostvars["localhost"]["replica_ip"] }}'
+    primary_host: '{{ PRIMARY }}'
+    primary_prv_ip: '{{ hostvars["localhost"]["primary_prv_ip"] }}'
+    primary_password: '{{ root_password }}'

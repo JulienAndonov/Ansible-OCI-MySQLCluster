@@ -1,0 +1,143 @@
+---
+
+- hosts: localhost
+  collections:
+    - oracle.oci
+  vars_files:
+    - ../variables.yml
+
+  tasks:
+    - block:
+      - name: Get Replica instance details
+        oci_compute_instance_facts:
+          compartment_id: "{{ instance_compartment }}"
+          lifecycle_state: "RUNNING"
+          display_name: "{{ REPLICA }}"
+        register: instances_details
+
+      - name: Save Replica info
+        set_fact:
+          instance: '{{ instances_details["instances"] }}'
+          instance_ips: '{{instances_details["instances"][0].primary_private_ip }}'
+
+      - name: Add instance(s) to in-memory inventory
+        add_host:
+          name: '{{ instance_ips }}'
+
+      - name: Get attached devices on Replica
+        oci_compute_volume_attachment_facts:
+          compartment_id: "{{ instance_compartment }}"
+          instance_id: "{{ instances_details.instances[0].id }}"
+        register: replica_volume_attachment_facts
+
+      - name: Debug, get replica attached devices
+        debug:
+          msg: "{{ replica_volume_attachment_facts }}"
+
+- import_playbook: detach_iscsi.yml
+  vars:
+    instance_ip: '{{ hostvars["localhost"]["instance_ips"] }}'
+
+- name: Create iSCSI attachement
+  hosts: localhost
+  collections:
+    - oracle.oci
+  vars_files:
+    - ~/resnap/vars/variables.yml
+  tasks:
+    - block:
+      - name: Get Primary instance details
+        oci_compute_instance_facts:
+          compartment_id: "{{ instance_compartment }}"
+          lifecycle_state: "RUNNING"
+          display_name: "{{ PRIMARY }}"
+        register: primary_details
+
+      - name: Save primary info
+        set_fact:
+          instance: '{{ primary_details["instances"] }}'
+          primary_prv_ip: '{{primary_details["instances"][0].primary_private_ip }}'
+
+      - name: Add primary instance(s) to in-memory inventory
+        add_host:
+          name: '{{ primary_prv_ip }}'
+
+      - name: Get attached devices on Primary
+        oci_compute_volume_attachment_facts:
+          compartment_id: "{{ instance_compartment }}"
+          instance_id: "{{ primary_details.instances[0].id }}"
+        register: primary_volume_attachment_facts
+
+      - name: Debug Primary data
+        debug:
+          msg: "{{ primary_volume_attachment_facts }}"
+
+      - name: Get all devices on Replica
+        oci_compute_volume_attachment_facts:
+          compartment_id: "{{ instance_compartment }}"
+          instance_id: "{{ instances_details.instances[0].id }}"
+        register: replica_volume_attachment_facts
+
+      - name: Debug all devices on Replicas
+        debug:
+          msg: "{{ replica_volume_attachment_facts }}"
+
+      - name: Set fact, attached device on the replica
+        set_fact:
+          replica_attached_blockdevice_id: '{{ replica_volume_attachment_facts.volume_attachments[0].id }}'
+          replica_attached_volume_id: '{{ replica_volume_attachment_facts.volume_attachments[0].volume_id }}'
+
+      - name: Debug replica attached devices
+        debug:
+          msg: "{{ replica_attached_blockdevice_id }}"
+
+      - name: Debug replica attached devices
+        debug:
+          msg: "{{ replica_attached_volume_id }}"
+
+      - name: Detach block level attachement device from Clone
+        oci_compute_volume_attachment:
+          volume_attachment_id: '{{ replica_attached_blockdevice_id }}'
+          state: absent
+        when: replica_attached_blockdevice_id|length != 0
+
+      - name: Delete the block volume
+        oci_blockstorage_volume:
+          volume_id: '{{ replica_attached_volume_id }}'
+          state: absent
+        when: replica_attached_volume_id|length != 0
+
+      - name: Create a clone data from another block volume in the same availability domain
+        oci_blockstorage_volume:
+          name: '{{ REPLICA }}-bv-clone'
+          source_details:
+            id: '{{ primary_volume_attachment_facts.volume_attachments[0].volume_id }}'
+            type: 'volume'
+          availability_domain: '{{ instance_ad }}'
+          compartment_id: '{{ instance_compartment }}'
+          size_in_gbs: 50
+        register: created_clone_block_volume
+
+      - name: Attach the clone to the replica
+        oci_compute_volume_attachment:
+          compartment_id: "{{ instance_compartment }}"
+          instance_id: "{{ instances_details.instances[0].id }}"
+          type: service_determined
+          volume_id: "{{ created_clone_block_volume.volume.id }}"
+        register: attached_block_device
+
+      - name: Save attachement commands
+        set_fact:
+          iscsi_attach_commands: '{{ attached_block_device.volume_attachment.iscsi_attach_commands }}'
+
+- import_playbook: execute_shell_commands_root.yml
+  vars:
+    instance_ip: '{{ hostvars["localhost"]["instance_ips"] }}'
+    bash_commands: '{{ hostvars["localhost"]["iscsi_attach_commands"] }}'
+
+- import_playbook: setup_replication.yml
+  vars:
+    instance_ip: '{{ hostvars["localhost"]["instance_ips"] }}'
+    primary_host: '{{ PRIMARY }}'
+    primary_prv_ip: '{{ hostvars["localhost"]["primary_prv_ip"] }}'
+    primary_password: '{{ root_password }}'
